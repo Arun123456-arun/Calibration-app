@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import datetime
@@ -46,119 +45,152 @@ if uploaded_file is not None:
             working_df = raw_df[["SERIAL NUMBER", "EQUIPMENT DESCRIPTION", "DEPARTMENT", "STATUS", "CALIB. DATE DUE"]].copy()
             working_df.columns = ["ID", "Description", "Department", "Status", "Due_Date"]
            
-            # Drop records missing serial numbers
+            # Drop records missing serial numbers safely
             working_df = working_df.dropna(subset=["ID"])
             working_df["ID"] = working_df["ID"].astype(str).str.strip()
             working_df = working_df[working_df["ID"] != "nan"]
+            working_df = working_df[working_df["ID"] != ""]
            
             # Filter out devices officially decommissioned or removed from rotation
             working_df["Status"] = working_df["Status"].astype(str).str.strip().str.upper()
             active_df = working_df[working_df["Status"] != "REMOVED"].copy()
            
             # Convert Excel calendar items dynamically into active python dates safely
-            active_df["Due_Date"] = pd.to_datetime(active_df["Due_Date"], errors='coerce').dt.date
+            active_df["Due_Date"] = pd.to_datetime(active_df["Due_Date"], errors='coerce')
             active_df = active_df.dropna(subset=["Due_Date"])
            
-            # --- SECTION 2: LIVE DATE DEADLINE PARSING ENGINE ---
-            # Set target timeline reference point to today's live coordinate: May 27, 2026
-            today = datetime.date(2026, 5, 27)
-           
-            # Calculate precise numerical window spaces remaining until expiration
-            active_df["Days Remaining"] = active_df["Due_Date"].apply(lambda d: (d - today).days)
-           
-            # Map items exclusively into your requested 3 category structure
-            def segment_instrument(row):
-                days = row["Days Remaining"]
-                if days < 0:
-                    return "OVERDUE"
-                elif days <= 30:
-                    return "Due in Next 30 days"
-                elif days <= 49: # 7 weeks = 49 days
-                    return "Due in Next 7 Weeks"
-                else:
-                    return "VALID"
-           
-            active_df["Time Segment"] = active_df.apply(segment_instrument, axis=1)
-           
-            # --- SECTION 3: SUMMARY DISPLAY MATRIX ---
-            st.markdown("---")
-            st.subheader("📊 2. Department Calibration Distribution Summary Matrix")
-           
-            matrix_records = []
-            for d in DEPARTMENTS_LIST:
-                # Group data records cleanly ignoring structural casing typos
-                dept_mask = active_df[active_df["Department"].astype(str).str.strip().str.lower() == d.lower()]
-               
-                matrix_records.append({
-                    "Departments": d,
-                    "OVERDUE": len(dept_mask[dept_mask["Time Segment"] == "OVERDUE"]),
-                    "Due in Next 30 days": len(dept_mask[dept_mask["Time Segment"] == "Due in Next 30 days"]),
-                    "Due in Next 7 Weeks": len(dept_mask[dept_mask["Time Segment"] == "Due in Next 7 Weeks"]),
-                    "TOTAL PENDING": len(dept_mask[dept_mask["Time Segment"] != "VALID"])
-                })
-               
-            summary_matrix_df = pd.DataFrame(matrix_records)
-            st.dataframe(summary_matrix_df, use_container_width=True, hide_index=True)
-           
-            # Layout Summary Footer Cards
-            c_ov, c_30, c_7w, c_tot = st.columns(4)
-            c_ov.metric("Total OVERDUE Instruments", summary_matrix_df["OVERDUE"].sum())
-            c_30.metric("Due within 30 Days", summary_matrix_df["Due in Next 30 days"].sum())
-            c_7w.metric("Due within 7 Weeks", summary_matrix_df["Due in Next 7 Weeks"].sum())
-            c_tot.metric("Total Active Backlog Count", summary_matrix_df["TOTAL PENDING"].sum())
-           
-            # --- SECTION 4: PLOTLY GRAPH CHART DISPLAY ENGINE ---
-            st.markdown("---")
-            st.subheader("📈 3. Equipment Backlog Status Distribution Chart")
-           
-            # Count pending records for visual graphing
-            pending_df = active_df[active_df["Time Segment"] != "VALID"]
-            if not pending_df.empty:
-                graph_data = pending_df["Time Segment"].value_counts().reset_index()
-                graph_data.columns = ["Urgency Status", "Equipment Count"]
-               
-                # Render clean bar charts with targeted color rules matching data mapping flags
-                fig = px.bar(
-                    graph_data,
-                    x="Urgency Status",
-                    y="Equipment Count",
-                    color="Urgency Status",
-                    color_discrete_map={
-                        "OVERDUE": "#E31B23",         # Coca-Cola Red
-                        "Due in Next 30 days": "#FFA500", # Warning Orange
-                        "Due in Next 7 Weeks": "#3399FF"  # Informational Blue
-                    },
-                    title="Pretoria Plant Total Pending Calibration Backlog"
-                )
-                fig.update_layout(showlegend=False, margin=dict(l=20, r=20, t=40, b=20))
-                st.plotly_chart(fig, use_container_width=True)
+            # Check if we still have data to process after cleaning
+            if active_df.empty:
+                st.warning("⚠️ No active calibration records found in the uploaded file after filtering.")
             else:
-                st.success("🎉 No outstanding actions recorded. All device calibrations are 100% current!")
+                # Set target timeline reference point to today's live coordinate: May 27, 2026
+                today = pd.to_datetime(datetime.date(2026, 5, 27))
+               
+                # Calculate precise numerical window spaces remaining until expiration using vector operation
+                active_df["Days Remaining"] = (active_df["Due_Date"] - today).dt.days
+                
+                # Convert back to standard python date for display reasons
+                active_df["Due_Date"] = active_df["Due_Date"].dt.date
+               
+                # Map items exclusively into your requested multi-tier structure
+                def segment_instrument(days):
+                    if days < 0:
+                        return "OVERDUE"
+                    elif days <= 7:
+                        return "Due in Next 7 Days"
+                    elif days <= 30:
+                        return "Due in 8 to 30 Days"
+                    elif days <= 49: # 7 weeks = 49 days
+                        return "Due in Next 7 Weeks"
+                    else:
+                        return "VALID"
+               
+                active_df["Time Segment"] = active_df["Days Remaining"].apply(segment_instrument)
+               
+                # --- SECTION 3: SUMMARY DISPLAY MATRIX ---
+                st.markdown("---")
+                st.subheader("📊 2. Department Calibration Distribution Summary Matrix")
+               
+                matrix_records = []
+                for d in DEPARTMENTS_LIST:
+                    # Group data records cleanly ignoring structural casing typos
+                    dept_mask = active_df[active_df["Department"].astype(str).str.strip().str.lower() == d.lower()]
+                   
+                    matrix_records.append({
+                        "Departments": d,
+                        "OVERDUE": int(len(dept_mask[dept_mask["Time Segment"] == "OVERDUE"])),
+                        "Due in Next 7 Days": int(len(dept_mask[dept_mask["Time Segment"] == "Due in Next 7 Days"])),
+                        "Due in 8 to 30 Days": int(len(dept_mask[dept_mask["Time Segment"] == "Due in 8 to 30 Days"])),
+                        "Due in Next 7 Weeks": int(len(dept_mask[dept_mask["Time Segment"] == "Due in Next 7 Weeks"])),
+                        "TOTAL PENDING": int(len(dept_mask[dept_mask["Time Segment"] != "VALID"]))
+                    })
+                   
+                summary_matrix_df = pd.DataFrame(matrix_records)
+                st.dataframe(summary_matrix_df, use_container_width=True, hide_index=True)
+               
+                # Layout Summary Footer Cards
+                c_ov, c_7d, c_30d, c_tot = st.columns(4)
+                c_ov.metric("Total OVERDUE", summary_matrix_df["OVERDUE"].sum())
+                c_7d.metric("Due within 7 Days", summary_matrix_df["Due in Next 7 Days"].sum())
+                c_30d.metric("Due 8 to 30 Days", summary_matrix_df["Due in 8 to 30 Days"].sum())
+                c_tot.metric("Total Active Backlog", summary_matrix_df["TOTAL PENDING"].sum())
+               
+                # --- SECTION 4: PLOTLY GRAPH CHART DISPLAY ENGINE ---
+                st.markdown("---")
+                st.subheader("📈 3. Equipment Backlog Status Distribution Chart")
+               
+                # Count pending records for visual graphing
+                pending_df = active_df[active_df["Time Segment"] != "VALID"]
+                if not pending_df.empty:
+                    graph_data = pending_df["Time Segment"].value_counts().reset_index()
+                    graph_data.columns = ["Urgency Status", "Equipment Count"]
+                    
+                    # Ensure custom fixed order of visibility on graph
+                    status_order = ["OVERDUE", "Due in Next 7 Days", "Due in 8 to 30 Days", "Due in Next 7 Weeks"]
+                    graph_data["Urgency Status"] = pd.Categorical(graph_data["Urgency Status"], categories=status_order, ordered=True)
+                    graph_data = graph_data.sort_values("Urgency Status")
+                   
+                    # Render clean bar charts with targeted color rules matching data mapping flags
+                    fig = px.bar(
+                        graph_data,
+                        x="Urgency Status",
+                        y="Equipment Count",
+                        color="Urgency Status",
+                        color_discrete_map={
+                            "OVERDUE": "#E31B23",             # Coca-Cola Red
+                            "Due in Next 7 Days": "#FF4500",     # Neon Orange-Red
+                            "Due in 8 to 30 Days": "#FFA500",    # Warning Yellow-Orange
+                            "Due in Next 7 Weeks": "#3399FF"     # Informational Blue
+                        },
+                        title="Pretoria Plant Total Pending Calibration Backlog"
+                    )
+                    fig.update_layout(showlegend=False, margin=dict(l=20, r=20, t=40, b=20))
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.success("🎉 No outstanding actions recorded. All device calibrations are 100% current!")
 
-            # --- SECTION 5: MANAGER WARNING ALERT TRANSMISSION CENTER ---
-            st.markdown("---")
-            st.subheader("✉️ 4. Upcoming Calibration Alert Logs (< 30 Days Email Warning)")
-           
-            upcoming_30 = active_df[active_df["Time Segment"] == "Due in Next 30 days"].copy()
-            st.write(f"Found **{len(upcoming_30)}** instruments requiring service within 30 days.")
-           
-            email_target = st.text_input("Enter manager alert report notification email address:", "boss_email@ccbsa.co.za")
-            if st.button("🚀 Dispatch Alert Email Notification Logs"):
-                if len(upcoming_30) > 0:
-                    email_body = f"CCBSA Pretoria Calibration Notice Log -\nReport Generated: {today}\n\nTHE FOLLOWING REQUIRING CALIBRATION WITHIN 30 DAYS:\n\n"
-                    for _, row in upcoming_30.iterrows():
-                        email_body += f"• ID: {row['ID']} | Dept: {row['Department']} | Description: {row['Description']} | Target Due: {row['Due_Date']} ({row['Days Remaining']} Days Left)\n"
+                # --- SECTION 5: MANAGER WARNING ALERT TRANSMISSION CENTER ---
+                st.markdown("---")
+                st.subheader("✉️ 4. Generate Calibration Executive Warning Log")
+               
+                overdue_items = active_df[active_df["Time Segment"] == "OVERDUE"]
+                items_7d = active_df[active_df["Time Segment"] == "Due in Next 7 Days"]
+                items_30d = active_df[active_df["Time Segment"] == "Due in 8 to 30 Days"]
+               
+                st.write(f"⚠️ Current Backlog Status: **{len(overdue_items)}** Overdue | **{len(items_7d)}** Due inside 7 days | **{len(items_30d)}** Due inside 30 days.")
+               
+                email_target = st.text_input("Enter manager alert report notification email address:", "boss_email@ccbsa.co.za")
+                if st.button("🚀 Dispatch Alert Email Notification Logs"):
+                    
+                    email_body = f"CCBSA Pretoria Calibration Notice Log -\nReport Generated: 2026-05-27\n"
+                    email_body += "==================================================\n\n"
+                    
+                    if len(overdue_items) > 0:
+                        email_body += "🚨 CRITICAL: THE FOLLOWING INSTRUMENTS ARE OVERDUE:\n"
+                        for _, row in overdue_items.iterrows():
+                            email_body += f"• ID: {row['ID']} | Dept: {row['Department']} | Desc: {row['Description']} | EXPIRED: {row['Due_Date']} ({abs(row['Days Remaining'])} Days Overdue)\n"
+                        email_body += "\n"
+                        
+                    if len(items_7d) > 0:
+                        email_body += "⚠️ HIGH PRIORITY: DUE WITHIN 7 DAYS:\n"
+                        for _, row in items_7d.iterrows():
+                            email_body += f"• ID: {row['ID']} | Dept: {row['Department']} | Desc: {row['Description']} | Due: {row['Due_Date']} ({row['Days Remaining']} Days Left)\n"
+                        email_body += "\n"
+                        
+                    if len(items_30d) > 0:
+                        email_body += "📅 ATTENTION: DUE WITHIN 8 TO 30 DAYS:\n"
+                        for _, row in items_30d.iterrows():
+                            email_body += f"• ID: {row['ID']} | Dept: {row['Department']} | Desc: {row['Description']} | Due: {row['Due_Date']} ({row['Days Remaining']} Days Left)\n"
+                        email_body += "\n"
                    
                     st.info("Email communication text package successfully constructed:")
                     st.code(email_body, language="text")
                     st.success(f"📩 Notification listing successfully queued for delivery to {email_target}!")
-                else:
-                    st.success("🎉 Safe! No instruments are currently due within the next 30 days.")
 
-            # --- SECTION 6: REGISTER DATA VIEW GRID ---
-            st.markdown("---")
-            st.subheader("📋 5. Asset Register Detailed Rows (Filtered Active Items)")
-            st.dataframe(active_df[["ID", "Description", "Department", "Due_Date", "Time Segment", "Days Remaining"]], use_container_width=True, hide_index=True)
+                # --- SECTION 6: REGISTER DATA VIEW GRID ---
+                st.markdown("---")
+                st.subheader("📋 5. Asset Register Detailed Rows (Filtered Active Items)")
+                st.dataframe(active_df[["ID", "Description", "Department", "Due_Date", "Time Segment", "Days Remaining"]], use_container_width=True, hide_index=True)
            
     except Exception as e:
         st.error(f"Error compiling spreadsheet rows: {str(e)}")
