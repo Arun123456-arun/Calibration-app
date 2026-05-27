@@ -27,58 +27,81 @@ uploaded_file = st.file_uploader("Upload your updated calibration master templat
 
 if uploaded_file is not None:
     try:
-        # Step 1: Handle file types flexibly (Excel or CSV)
+        # Read the file cleanly from row 1 (No skipping headers)
         if uploaded_file.name.endswith('.csv'):
             raw_df = pd.read_csv(uploaded_file)
         else:
             excel_obj = pd.ExcelFile(uploaded_file)
             raw_df = pd.read_excel(uploaded_file, sheet_name=excel_obj.sheet_names[0])
        
-        # Step 2: Clean hidden whitespace from headers and force uppercase matching
-        # Keeping duplicate flags intact (.1, .2) so we can map them precisely if needed
-        raw_df.columns = [str(c).strip().upper() for c in raw_df.columns]
-       
-        # Step 3: Map Columns dynamically using flexible matching rules to avoid layout mismatch crashes
-        id_col = next((c for c in raw_df.columns if "SERIAL NUMBER" in c or "SERIAL" in c), None)
-        desc_col = next((c for c in raw_df.columns if "EQUIPMENT DESCRIPTION" in c or "DESC" in c), None)
-        dept_col = next((c for c in raw_df.columns if "DEPARTMENT" in c), None)
-        status_col = next((c for c in raw_df.columns if "STATUS" in c), None)
+        # Clean whitespaces from current headers to keep matching simple
+        raw_df.columns = [str(c).strip() for c in raw_df.columns]
         
-        # Target the final calibration deadline evaluation point
-        date_col = next((c for c in raw_df.columns if "CALIB. DATE DUE" in c or "DATE DUE" in c), None)
-       
-        # Verify structure validation check
-        missing_cols = [col for col in ["SERIAL NUMBER", "EQUIPMENT DESCRIPTION", "DEPARTMENT", "STATUS", "CALIB. DATE DUE"] if not locals()[f"{'id' if col=='SERIAL NUMBER' else 'desc' if col=='EQUIPMENT DESCRIPTION' else 'dept' if col=='DEPARTMENT' else 'status' if col=='STATUS' else 'date'}_col"]]
-       
-        if missing_cols:
-            st.error(f"❌ Structural match failure. Could not find or map these structural requirements: {missing_cols}. Please verify header names on Row 1.")
-            st.write("Headers found in your file:", list(raw_df.columns))
+        # --- SAFE MANDATORY COLS EXTRACTION ENGINE ---
+        # Instead of positional filtering, look for exact string matches safely
+        id_col = None
+        desc_col = None
+        dept_col = None
+        status_col = None
+        date_col = None
+
+        for col in raw_df.columns:
+            col_upper = col.upper()
+            if "SERIAL NUMBER" in col_upper:
+                id_col = col
+            elif "EQUIPMENT DESCRIPTION" in col_upper:
+                desc_col = col
+            elif "DEPARTMENT" in col_upper:
+                dept_col = col
+            elif "STATUS" in col_upper:
+                status_col = col
+            elif "CALIB. DATE DUE" in col_upper or "DATE DUE" in col_upper:
+                # Always grab the FIRST valid matching date column found
+                if not date_col:
+                    date_col = col
+
+        # Double Check: If naming maps failed, default strictly to standard structural fallback index strings
+        if not id_col and "SERIAL NUMBER" in raw_df.columns: id_col = "SERIAL NUMBER"
+        if not desc_col and "EQUIPMENT DESCRIPTION" in raw_df.columns: desc_col = "EQUIPMENT DESCRIPTION"
+        if not dept_col and "DEPARTMENT" in raw_df.columns: dept_col = "DEPARTMENT"
+        if not status_col and "STATUS" in raw_df.columns: status_col = "STATUS"
+        if not date_col and "CALIB. DATE DUE" in raw_df.columns: date_col = "CALIB. DATE DUE"
+
+        # Verify validation match
+        if not (id_col and desc_col and dept_col and status_col and date_col):
+            st.error("❌ Key columns missing. Please ensure your columns are named: 'DEPARTMENT', 'SERIAL NUMBER', 'EQUIPMENT DESCRIPTION', 'STATUS', and 'CALIB. DATE DUE'")
+            st.write("Columns found in your file:", list(raw_df.columns))
         else:
-            # Re-structure columns into uniform data arrays
-            working_df = raw_df[[id_col, desc_col, dept_col, status_col, date_col]].copy()
-            working_df.columns = ["ID", "Description", "Department", "Status", "Due_Date"]
+            # Build clean data arrays using direct series references to eliminate KeyError index bugs completely
+            working_df = pd.DataFrame({
+                "ID": raw_df[id_col],
+                "Description": raw_df[desc_col],
+                "Department": raw_df[dept_col],
+                "Status": raw_df[status_col],
+                "Due_Date": raw_df[date_col]
+            }).copy()
            
             # Drop records missing serial numbers safely
             working_df = working_df.dropna(subset=["ID"])
             working_df["ID"] = working_df["ID"].astype(str).str.strip()
             working_df = working_df[(working_df["ID"] != "nan") & (working_df["ID"] != "")]
            
-            # Filter out items officially decommissioned, removed, or approved for exclusion
+            # Filter out items officially decommissioned, removed, or marked for deletion
             working_df["Status"] = working_df["Status"].astype(str).str.strip().str.upper()
             active_df = working_df[~working_df["Status"].isin(["REMOVED", "YES"])].copy()
            
-            # Convert calendar dates cleanly, turning missing or bad text formats into blank rows
+            # Convert calendar dates cleanly, turning missing formats into blank values safely
             active_df["Due_Date"] = pd.to_datetime(active_df["Due_Date"], errors='coerce')
             active_df = active_df.dropna(subset=["Due_Date"])
            
-            # Check if data arrays contain entries after sanitation filters
+            # Check if dataset contains entries after sanitation filters
             if active_df.empty:
-                st.warning("⚠️ No active validation records found in the uploaded file tracking framework after filtering.")
+                st.warning("⚠️ No active validation records found in the uploaded file framework after filtering.")
             else:
                 # Set target timeline reference point to today's live coordinate: May 27, 2026
                 today = datetime.date(2026, 5, 27)
                
-                # Fallback Calculation Method: Avoids Series object execution failures entirely
+                # Calculation Method: Avoids Series object execution failures entirely
                 def get_days_remaining(val):
                     try:
                         return (val.date() - today).days
@@ -143,7 +166,7 @@ if uploaded_file is not None:
                     graph_data = pending_df["Time Segment"].value_counts().reset_index()
                     graph_data.columns = ["Urgency Status", "Equipment Count"]
                     
-                    # Enforce locked layout sequence sorting rules on graph canvas
+                    # Enforce sorted sequence orders on chart layout
                     status_order = ["OVERDUE", "Due in Next 7 Days", "Due in 8 to 30 Days", "Due in Next 7 Weeks"]
                     graph_data["Urgency Status"] = pd.Categorical(graph_data["Urgency Status"], categories=status_order, ordered=True)
                     graph_data = graph_data.sort_values("Urgency Status")
@@ -155,9 +178,9 @@ if uploaded_file is not None:
                         color="Urgency Status",
                         color_discrete_map={
                             "OVERDUE": "#E31B23",             # Coca-Cola Red
-                            "Due in Next 7 Days": "#FF4500",     # Deep Red-Orange
-                            "Due in 8 to 30 Days": "#FFA500",    # Warning Amber
-                            "Due in Next 7 Weeks": "#3399FF"     # Info Blue
+                            "Due in Next 7 Days": "#FF4500",     # Neon Red-Orange
+                            "Due in 8 to 30 Days": "#FFA500",    # Warning Orange
+                            "Due in Next 7 Weeks": "#3399FF"     # Informational Blue
                         },
                         title="Pretoria Plant Total Pending Calibration Backlog"
                     )
@@ -213,5 +236,3 @@ if uploaded_file is not None:
         st.error(f"Error compiling spreadsheet rows: {str(e)}")
 else:
     st.info("💡 Please upload your clean formatted Excel spreadsheet above to display the updated monitoring panels.")
-               
-                                    
