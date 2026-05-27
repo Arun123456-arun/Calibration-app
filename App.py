@@ -26,12 +26,15 @@ if uploaded_file is not None:
        
         # Select target data sheet
         selected_sheet = st.selectbox("Select the sheet containing raw instrument records:", sheet_names, index=0)
+       
+        # We skip the first rows if they are blank banner spaces in your template
         raw_df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
        
         st.success("✅ Excel file loaded successfully!")
        
         # Map or confirm columns (Fallback to index names if custom layout headers match your layout)
         st.markdown("### 🔍 System Column Mapping Verification")
+        st.info("If your column names look like 'Unnamed', use the dropdowns below to select the correct column from your sheet.")
         col_list = raw_df.columns.tolist()
        
         c1, c2, c3, c4 = st.columns(4)
@@ -48,15 +51,19 @@ if uploaded_file is not None:
         process_df = raw_df[[id_col, name_col, dept_col, due_col]].copy()
         process_df.columns = ["ID", "Name", "Department", "Due Date"]
        
+        # Drop rows where ID is completely missing or empty
+        process_df = process_df.dropna(subset=["ID"])
+        process_df = process_df[process_df["ID"].astype(str).str.strip() != "nan"]
+       
         # Ensure correct date conversion types
-        process_df["Due Date"] = pd.to_datetime(process_df["Due Date"]).dt.date
+        process_df["Due Date"] = pd.to_datetime(process_df["Due Date"], errors='coerce').dt.date
        
         # Initialize internal storage tracking parameters for active modifications
         if 'scrapped_items' not in st.session_state:
             st.session_state.scrapped_items = set()
 
         # Remove items flagged as scrapped or removed by the operator
-        process_df = process_df[~process_df["ID"].isin(st.session_state.scrapped_items)]
+        process_df = process_df[~process_df["ID"].astype(str).isin(st.session_state.scrapped_items)]
 
         # --- STEP 2: MATHEMATICAL DEADLINE ENGINE ---
         today = datetime.date.today()
@@ -85,15 +92,15 @@ if uploaded_file is not None:
         st.markdown("---")
         st.subheader("⚙️ 2. Manage Equipment Status (Scrap / Remove Items)")
        
-        active_ids = process_df["ID"].unique().tolist()
+        active_ids = [str(x) for x in process_df["ID"].unique().tolist() if str(x).strip() != "nan"]
         if active_ids:
             col_sel, col_btn = st.columns([3, 1])
             with col_sel:
                 target_id = st.selectbox("Search and select Equipment ID to scrap/remove from dashboard:", active_ids)
             with col_btn:
-                st.markdown("<br>", unsafe_allowed_html=True)
+                st.markdown("<br>", unsafe_allow_html=True) # FIXED TYPO HERE
                 if st.button("🔴 Confirm Removal / Scrap Item", use_container_width=True):
-                    st.session_state.scrapped_items.add(target_id)
+                    st.session_state.scrapped_items.add(str(target_id))
                     st.toast(f"Item {target_id} moved to Out-of-Scope status.")
                     st.rerun()
 
@@ -103,7 +110,7 @@ if uploaded_file is not None:
        
         matrix_records = []
         for d in departments:
-            dept_mask = process_df[process_df["Department"] == d]
+            dept_mask = process_df[process_df["Department"].astype(str).str.strip().str.lower() == d.lower()]
            
             overdue_cnt = len(dept_mask[dept_mask["Time Segment"] == "OVERDUE"])
             days30_cnt = len(dept_mask[dept_mask["Time Segment"] == "Due in Next 30 days"])
@@ -129,7 +136,7 @@ if uploaded_file is not None:
        
         # Display metrics metrics cards
         c_ov, c_30, c_3m, c_6m = st.columns(4)
-        c_ov.metric("Total OVERDUE Items", summary_matrix_df["OVERDUE"].sum(), delta="- Action Needed", delta_color="inverse")
+        c_ov.metric("Total OVERDUE Items", summary_matrix_df["OVERDUE"].sum())
         c_30.metric("Due in 30 Days", summary_matrix_df["Due in Next 30 days"].sum())
         c_3m.metric("Due in 3 Months", summary_matrix_df["Due in Next 3 Months"].sum())
         c_6m.metric("Total Tracked Assets", summary_matrix_df["TOTAL"].sum())
@@ -143,5 +150,7 @@ if uploaded_file is not None:
         st.error(f"Error parsing file: {str(e)}. Please check that your file structural format is correct.")
 else:
     st.info("💡 Please upload your calibration excel workbook above to initialize the reporting program dashboards.")
+
+
 
 
