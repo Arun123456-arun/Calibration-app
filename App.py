@@ -12,10 +12,10 @@ st.title("📊 CCBSA Calibration Master System — Pretoria")
 if 'scrapped_items' not in st.session_state:
     st.session_state.scrapped_items = set()
 
-# Departments tracking matrix list
+# Explicit list of departments matching your corporate matrix layout structure
 DEPARTMENTS_LIST = ["Clinic & Security", "Engineering", "Packaging", "Quality & Lab", "Site", "Syrup room", "Utilities", "Warehouse", "Supply & Raw Mats"]
 
-# --- SECTION 1: MICROSOFT LINK INTERACTION ENGINE ---
+# --- SECTION 1: DATABASE PERSISTENCE ENGINE ---
 st.subheader("📁 1. System Master Database Storage Connection")
 
 st.markdown("""
@@ -25,89 +25,87 @@ st.markdown("""
 3. Paste that web URL address in the box below to link the data dynamically.
 """)
 
-# Microsoft link input container
 microsoft_url = st.text_input(
     "Paste your Microsoft OneDrive/SharePoint file share link here:",
     placeholder="https://sharepoint.com..."
 )
 
 uploaded_file = None
-# Fallback to file uploader if no link is pasted yet
 if not microsoft_url:
-    st.info("ℹ️ Alternatively, upload the file manually below until you paste your Microsoft Link:")
+    st.info("ℹ️ Alternatively, upload your new 2-sheet file manually below until you paste your Microsoft Link:")
     uploaded_file = st.file_uploader("Upload your master calibration template workbook file directly:", type=["xlsx", "xls"])
 
-# --- PROCESSING SYSTEM DATA ENGINE ---
 raw_df = None
 
+# Load from Microsoft Link
 if microsoft_url:
     try:
-        # Convert standard SharePoint links into direct file download paths
-        direct_download_url = microsoft_url.replace(":x:/g/", ":x:/g/").split("?")[0] + "?download=1"
-        raw_df = pd.read_excel(direct_download_url)
+        direct_download_url = microsoft_url.split("?") + "?download=1"
+        # Reading data sheet while handling blank top rows dynamically
+        raw_df = pd.read_excel(direct_download_url, skiprows=4)
         st.success("⚡ Data successfully fetched from your live Microsoft cloud storage location!")
     except Exception as link_err:
-        st.error(f"Could not reach Microsoft Link. Please ensure link access permissions allow sharing. Error details: {str(link_err)}")
+        st.error(f"Could not reach Microsoft Link. Ensure link access permissions allow sharing. Error: {str(link_err)}")
 
+# Load from Manual Upload
 if uploaded_file is not None and raw_df is None:
     try:
         excel_obj = pd.ExcelFile(uploaded_file)
-        # Automatically read the first available data sheet
-        raw_df = pd.read_excel(uploaded_file, sheet_name=excel_obj.sheet_names[0])
+        # Select first sheet and skip top header spacing
+        raw_df = pd.read_excel(uploaded_file, sheet_name=excel_obj.sheet_names[0], skiprows=4)
         st.success("🎉 Local file parsed successfully into active framework memory!")
     except Exception as file_err:
         st.error(f"Error parsing file: {str(file_err)}")
 
-# Execute application pipeline logic only when data exists
+# --- RUN COMPUTATIONS IF DATA IS EXTRACTED ---
 if raw_df is not None:
-    # CLEANING STEP: Clean the data rows by looking for the row that has 'EQUIPMENT NAME'
-    cleaned_df = raw_df.copy()
-   
-    # Let's dynamically look for your column row headers to skip the empty top cells visible in your screenshot
-    found_header = False
-    for i in range(min(15, len(cleaned_df))):
-        row_values = [str(val).strip().upper() for val in cleaned_df.iloc[i].values]
-        if 'EQUIPMENT NAME' in row_values or 'CALIB. DATE' in row_values:
-            cleaned_df.columns = [str(c).strip() for c in cleaned_df.iloc[i]]
-            cleaned_df = cleaned_df.iloc[i+1:].reset_index(drop=True)
-            found_header = True
-            break
-           
-    col_list = cleaned_df.columns.tolist()
+    # Clean up column spaces to guarantee variable matching loops pass
+    raw_df.columns = [str(c).strip() for c in raw_df.columns]
+    col_list = raw_df.columns.tolist()
    
     st.markdown("### 🔍 Data Column Matching Selector")
-    st.info("Match the dropdown configurations below with your sheet labels to align data metrics perfectly.")
+    st.info("The system pre-selected columns from your screenshot. Confirm settings below to map data fields.")
    
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        id_col = st.selectbox("Equipment ID / Serial No Parameter:", col_list, index=3 if "SERIAL NUMBER" in col_list else 0)
-    with c2:
-        name_col = st.selectbox("Equipment Name / Title Column:", col_list, index=0 if "EQUIPMENT NAME" in col_list else 0)
-    with c3:
-        # Fallback tracking assignment if specific column isn't found
-        dept_col = st.selectbox("Department Assignment Source:", col_list, index=0)
-        st.caption("⚠️ Note: If your file does not have a separate 'Department' column, assign it to any label like Name or Comments to group items.")
-    with c4:
-        due_col = st.selectbox("Next Calibration Due Date Tracker:", col_list, index=6 if "CALIB. DATE" in col_list else 0)
+    # Precise automatic column index locating logic based on your visual layout template headers
+    idx_dept = col_list.index("DEPARTMENT") if "DEPARTMENT" in col_list else 0
+    idx_id = col_list.index("SERIAL NUMBER") if "SERIAL NUMBER" in col_list else 0
+    idx_name = col_list.index("EQUIPMENT DESCRIPTION") if "EQUIPMENT DESCRIPTION" in col_list else 0
+    idx_due = col_list.index("CALIB. DATE DUE") if "CALIB. DATE DUE" in col_list else 0
+    idx_status = col_list.index("STATUS") if "STATUS" in col_list else 0
 
-    # Re-structure columns to clean standard definitions
-    working_df = cleaned_df[[id_col, name_col, dept_col, due_col]].copy()
-    working_df.columns = ["ID", "Name", "Department", "Due Date"]
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        dept_col = st.selectbox("Department Assignment Source:", col_list, index=idx_dept)
+    with c2:
+        id_col = st.selectbox("Equipment ID / Serial No Parameter:", col_list, index=idx_id)
+    with c3:
+        name_col = st.selectbox("Equipment Name / Title Column:", col_list, index=idx_name)
+    with c4:
+        status_col = st.selectbox("Status Condition Column:", col_list, index=idx_status)
+    with c5:
+        due_col = st.selectbox("Next Calibration Due Date Tracker:", col_list, index=idx_due)
+
+    # Re-structure columns into uniform data arrays
+    working_df = raw_df[[id_col, name_col, dept_col, status_col, due_col]].copy()
+    working_df.columns = ["ID", "Name", "Department", "Excel_Status", "Due Date"]
    
-    # Drop empty records and filter scrapped elements
+    # Drop completely blank row references
     working_df = working_df.dropna(subset=["ID"])
     working_df["ID"] = working_df["ID"].astype(str).str.strip()
     working_df = working_df[working_df["ID"] != "nan"]
    
-    # Clean up status field strings
+    # Process department strings cleanly for comparison metrics
     working_df["Department"] = working_df["Department"].astype(str).str.strip()
+   
+    # Filter out items already marked as REMOVED or manually Scrapped
+    working_df = working_df[working_df["Excel_Status"].astype(str).str.strip().str.upper() != "REMOVED"]
     working_df = working_df[~working_df["ID"].isin(st.session_state.scrapped_items)]
    
-    # Convert dates reliably
+    # Convert custom system date strings dynamically safely
     working_df["Due Date"] = pd.to_datetime(working_df["Due Date"], errors='coerce').dt.date
     today = datetime.date.today()
 
-    # Calculate days remaining until calibration is due
+    # Calculate precise remaining calendar days until due
     def calculate_days_left(due_date):
         if pd.isnull(due_date): return 999
         return (due_date - today).days
@@ -134,7 +132,7 @@ if raw_df is not None:
     st.markdown("---")
     st.subheader("✉️ 2. Upcoming Calibration Alert Logs (< 30 Days Warning Notification)")
    
-    # Target values expiring in less than 30 days
+    # Business Rule: Capture rows where deadline is less than 30 days remaining, but not overdue yet
     upcoming_30_days = working_df[(working_df["Days Remaining"] >= 0) & (working_df["Days Remaining"] <= 30)].copy()
    
     col_m1, col_m2 = st.columns(2)
@@ -147,23 +145,21 @@ if raw_df is not None:
         if len(upcoming_30_days) > 0:
             email_body = f"CCBSA Pretoria Calibration Warning Alert -\nGenerated on: {today}\n\nTHE FOLLOWING ITEMS ARE DUE FOR CALIBRATION IN LESS THAN 30 DAYS:\n\n"
             for _, row in upcoming_30_days.iterrows():
-                email_body += f"• ID: {row['ID']} | Name: {row['Name']} | Due Date: {row['Due Date']} ({row['Days Remaining']} Days Left)\n"
+                email_body += f"• ID: {row['ID']} | Dept: {row['Department']} | Description: {row['Name']} | Due Date: {row['Due Date']} ({row['Days Remaining']} Days Left)\n"
            
             st.info("✨ Complete warning delivery notification package rendered below:")
             st.code(email_body, language="text")
-            st.success(f"📩 Notification list dispatched successfully to {email_target}!")
+            st.success(f"📩 Notification summary data ready for transmission log list dispatch successfully to {email_target}!")
         else:
             st.success("🎉 All systems clear! No instruments are expiring within the next 30 days.")
 
     # --- SECTION 3: METRIC GRAPHS ENGINE ---
     st.markdown("---")
-    st.subheader("📊 3. Performance Metric Dashboards")
+    st.subheader("📊 3. Performance Status Charts")
    
-    # Count the number of items in each time segment
     graph_counts = working_df["Time Segment"].value_counts().reset_index()
     graph_counts.columns = ["Status Condition", "Total Instrument Count"]
    
-    # Color-coded metric plot generator
     color_map = {"OVERDUE": "#FF4B4B", "Due in Next 30 days": "#FFA500", "Due in Next 3 Months": "#3399FF", "VALID": "#2ECC71"}
    
     fig = px.bar(
@@ -178,16 +174,15 @@ if raw_df is not None:
 
     # --- SECTION 4: LIVE CALIBRATION SUMMARY MATRIX ---
     st.markdown("---")
-    st.subheader("📋 4. Live Summary Distribution Matrix")
+    st.subheader("📋 4. Department Calibration Distribution Summary Matrix")
    
     matrix_records = []
-    # If the sheet doesn't contain standard department values, let's group by active distinct titles
-    unique_depts = working_df["Department"].unique().tolist()
-   
-    for d in unique_depts:
-        dept_mask = working_df[working_df["Department"] == d]
+    for d in DEPARTMENTS_LIST:
+        # Filter matching specific text criteria ignoring capitalization anomalies
+        dept_mask = working_df[working_df["Department"].str.lower() == d.lower()]
+       
         matrix_records.append({
-            "Tracking Group": d,
+            "Departments": d,
             "OVERDUE": len(dept_mask[dept_mask["Time Segment"] == "OVERDUE"]),
             "Due in Next 30 days": len(dept_mask[dept_mask["Time Segment"] == "Due in Next 30 days"]),
             "Due in Next 3 Months": len(dept_mask[dept_mask["Time Segment"] == "Due in Next 3 Months"]),
@@ -197,9 +192,17 @@ if raw_df is not None:
        
     summary_matrix_df = pd.DataFrame(matrix_records)
     st.dataframe(summary_matrix_df, use_container_width=True, hide_index=True)
+   
+    # Summary total calculation footer widgets
+    c_ov, c_30, c_3m, c_tot = st.columns(4)
+    c_ov.metric("Total OVERDUE Items", summary_matrix_df["OVERDUE"].sum())
+    c_30.metric("Due within 30 Days", summary_matrix_df["Due in Next 30 days"].sum())
+    c_3m.metric("Due within 3 Months", summary_matrix_df["Due in Next 3 Months"].sum())
+    c_tot.metric("Total Tracked Assets", summary_matrix_df["TOTAL"].sum())
 
     # --- SECTION 5: REGISTER DETAIL PREVIEWER ---
     st.markdown("---")
     st.subheader("📋 5. Asset Register Detailed Rows")
-    st.dataframe(working_df, use_container_width=True, hide_index=True)
+    st.dataframe(working_df[["ID", "Name", "Department", "Due Date", "Time Segment", "Days Remaining"]], use_container_width=True, hide_index=True)
+    
     
