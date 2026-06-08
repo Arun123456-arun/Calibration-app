@@ -1,12 +1,3 @@
-To take this portal to an audit-ready level for your boss, we need to move from just tracking *dates* to tracking **compliance evidence**.
-Looking at your file data, your sheet already has a built-in compliance audit tracking column: **"2. SERVICE PROVIDER EVIDENCE IN PLACE (YES/NO)"**. We can hook directly into that column to instantly tell your boss which certificates are missing, while also providing a **live document upload portal** for incoming certificates.
-Here is your fully upgraded **CCBSA Calibration & Governance Control Portal** script.
-### Key Governance Features Added:
- 1. **Certificate Verification Dashboard:** Instantly reads your master sheet to show an audit summary of how many certificates are missing or present by department.
- 2. **Interactive File Upload Portal:** Allows technicians to upload PDF calibration certificates directly into the app. It cross-checks the filename against the instrument IDs and flags it as "Uploaded" or "Missing".
- 3. **Governance & Compliance Framework Tab:** Built-in corporate documentation outlining the strict governance behind calibration (ISO 9001/ISO 17025 tracking, tracking incoming certificates, validation workflows, and sign-offs).
-### Complete Upgraded Streamlit Code
-```python
 import streamlit as st
 import pandas as pd
 import datetime
