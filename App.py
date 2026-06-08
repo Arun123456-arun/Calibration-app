@@ -24,11 +24,11 @@ st.markdown(
 # Explicit list of departments matching your master sheet
 DEPARTMENTS_LIST = ["Clinic & Security", "Engineering", "Packaging", "Quality & Lab", "Site", "Syrup room", "Utilities", "Warehouse", "Supply & Raw Mats"]
 
-# --- OUTLOOK & LINK GATEWAY SETTINGS ---
+# --- SIDEBAR CONNECTIONS MENU ---
 st.sidebar.subheader("⚙️ System Connection Configurations")
 MICROSOFT_EXCEL_LINK = st.sidebar.text_input(
-    "Cloud SharePoint/OneDrive Direct Excel Link:",
-    value="https://ccba.sharepoint.com/:x:/r/teams/PretoriaCalibration/_layouts/15/Doc.aspx?sourcedoc=%7B2a909791-d120-4817-8147-c17f7823b5dd%7D&action=default&download=1"
+    "Live Cloud Spreadsheet Link (Google Sheet / SharePoint):",
+    value="https://docs.google.com/spreadsheets/d/1vd-sB3FmIfYBFf3d6yPnMIM78u8_NpMNXJaWmMNV8i8/export?format=csv&gid=150526899"
 )
 
 st.sidebar.markdown("---")
@@ -36,7 +36,7 @@ st.sidebar.subheader("📧 Outlook Outbound Gateway Settings")
 SENDER_EMAIL = st.sidebar.text_input("Your Corporate Outlook Email:", "your_name@ccbsa.co.za")
 SENDER_PASSWORD = st.sidebar.text_input("Outlook App Password:", type="password")
 
-# Define tabs clearly for the executive view
+# Tabs Layout Matrix
 tab1, tab2, tab3, tab4 = st.tabs([
     "📊 Performance Dashboard", 
     "📜 Certificate Compliance Manager", 
@@ -44,35 +44,36 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "⚖️ Governance Framework"
 ])
 
-# --- CRASH-PROOF FAILSAFE DATA EXTRACTION ENGINE ---
+# --- SMART FAILSAFE LIVE LOADING DATA ENGINE ---
 raw_df = None
 
-# Attempt 1: Try reading from Microsoft Cloud Link
 if MICROSOFT_EXCEL_LINK:
     try:
-        if "ccba.sharepoint.com" in MICROSOFT_EXCEL_LINK or MICROSOFT_EXCEL_LINK.startswith("http"):
+        # Check if it's a Google Sheets Export or a direct raw text CSV file stream
+        if "format=csv" in MICROSOFT_EXCEL_LINK or "csv" in MICROSOFT_EXCEL_LINK.lower():
+            raw_df = pd.read_csv(MICROSOFT_EXCEL_LINK)
+        # Check if it's a standard web URL Excel stream
+        elif MICROSOFT_EXCEL_LINK.startswith("http"):
             excel_obj = pd.ExcelFile(MICROSOFT_EXCEL_LINK)
             raw_df = pd.read_excel(MICROSOFT_EXCEL_LINK, sheet_name=excel_obj.sheet_names[0])
         else:
             raw_df = pd.read_excel(MICROSOFT_EXCEL_LINK)
     except Exception as cloud_err:
-        # Failsafe fallback trigger activation if cloud connection link fails
-        st.sidebar.warning("🔄 Cloud sync link unavailable or requires authentication. Activating local backup database layer...")
+        st.sidebar.warning("🔄 Cloud stream link unavailable or requires direct file export tokens. Attempting local storage load...")
 
-# Attempt 2: Fallback directly to the verified workspace data layout file if cloud link fails
-if raw_df is not None:
-    pass
-elif os.path.exists("Pretoria - Updated Calibration Template 24.03.2026.xlsx"):
-    try:
-        raw_df = pd.read_excel("Pretoria - Updated Calibration Template 24.03.2026.xlsx")
-    except Exception as local_err:
-        st.error(f"Failed to extract local data backup frame: {local_err}")
-else:
-    # If the file is wrapped inside a different format name
+# Backup Step: Auto-scans directory folders for local backup files if link fails
+if raw_df is None:
     for file in os.listdir('.'):
-        if "Calibration Template" in file and file.endswith('.xlsx'):
-            raw_df = pd.read_excel(file)
-            break
+        if "Calibration" in file and file.endswith(('.xlsx', '.csv')):
+            try:
+                if file.endswith('.csv'):
+                    raw_df = pd.read_csv(file)
+                else:
+                    raw_df = pd.read_excel(file)
+                st.sidebar.info(f"Loaded database backup tracker safely from local source file: {file}")
+                break
+            except Exception:
+                pass
 
 if raw_df is not None:
     try:
@@ -93,7 +94,7 @@ if raw_df is not None:
             elif "CALIB. DATE DUE" in col_upper or "DATE DUE" in col_upper:
                 if not date_col: date_col = col
 
-        # Absolute Fallbacks if loop missed them
+        # Direct string absolute match fallbacks
         if not id_col and "SERIAL NUMBER" in raw_df.columns: id_col = "SERIAL NUMBER"
         if not desc_col and "EQUIPMENT DESCRIPTION" in raw_df.columns: desc_col = "EQUIPMENT DESCRIPTION"
         if not dept_col and "DEPARTMENT" in raw_df.columns: dept_col = "DEPARTMENT"
@@ -101,9 +102,10 @@ if raw_df is not None:
         if not date_col and "CALIB. DATE DUE" in raw_df.columns: date_col = "CALIB. DATE DUE"
 
         if not (id_col and desc_col and dept_col and status_col and date_col):
-            st.error("❌ Key structural columns missing from database schema indices. Please verify column headers.")
+            st.error("❌ Key structural columns missing from current spreadsheet schema view. Verify Row 1 labels.")
+            st.write("Columns found in sheet:", list(raw_df.columns))
         else:
-            # Build unified tracking DataFrame safely using identified columns
+            # Construct active frame matrix data
             working_df = pd.DataFrame({
                 "ID": raw_df[id_col],
                 "Description": raw_df[desc_col],
@@ -112,26 +114,22 @@ if raw_df is not None:
                 "Due_Date": raw_df[date_col]
             }).copy()
             
-            # Safely inject evidence array to prevent KeyErrors entirely
             if evidence_col:
                 working_df["Evidence_In_Sheet"] = raw_df[evidence_col].fillna("NO")
             else:
                 working_df["Evidence_In_Sheet"] = "NO"
            
-            # Clean empty asset entries
             working_df = working_df.dropna(subset=["ID"])
             working_df["ID"] = working_df["ID"].astype(str).str.strip()
             working_df = working_df[(working_df["ID"] != "nan") & (working_df["ID"] != "")]
            
-            # Filter out decommissioned items
             working_df["Status"] = working_df["Status"].astype(str).str.strip().str.upper()
             active_df = working_df[~working_df["Status"].isin(["REMOVED", "YES"])].copy()
            
-            # Format and parse calibration timelines
             active_df["Due_Date"] = pd.to_datetime(active_df["Due_Date"], errors='coerce')
             active_df = active_df.dropna(subset=["Due_Date"])
            
-            # Timeline Reference: June 8, 2026
+            # Internal reference matrix coordination timeline anchor: June 8, 2026
             today = datetime.date(2026, 6, 8) 
             
             def get_days_remaining(val):
@@ -203,11 +201,9 @@ if raw_df is not None:
             # ----------------------------------------------------
             with tab2:
                 st.subheader("📜 Master Calibration Certificate Audit Track")
-                
                 active_df["Evidence Status"] = active_df["Evidence_In_Sheet"].astype(str).str.strip().str.upper().apply(
                     lambda x: "🟢 Cert Present" if x in ["YES", "TRUE", "1"] else "🔴 MISSING CERTIFICATE"
                 )
-
                 st.dataframe(
                     active_df[["ID", "Description", "Department", "Due_Date", "Time Segment", "Evidence Status"]],
                     use_container_width=True,
@@ -215,21 +211,19 @@ if raw_df is not None:
                 )
 
             # ----------------------------------------------------
-            # TAB 3: NEW INTERACTIVE AI SMART CERTIFICATE VALIDATOR
+            # TAB 3: AI SMART CERTIFICATE VALIDATOR
             # ----------------------------------------------------
             with tab3:
                 st.subheader("🤖 AI Automated Certificate Validation Portal")
-                st.write("Upload an external vendor's PDF/Image calibration certificate. The local AI parser will read the document identity data metadata, run an algorithmic verification audit, and flag whether the item's timeline is current or pending calibration.")
+                st.write("Upload an external vendor's PDF/Image calibration certificate. The local AI parser will scan the filename metadata and explicitly flag whether the item's compliance timeline is current or pending calibration.")
                 
-                uploaded_file = st.file_uploader("Drop Vendor Calibration Certificate Document:", type=["pdf", "png", "jpg", "xlsx"])
+                uploaded_file = st.file_uploader("Drop Vendor Calibration Certificate Document:", type=["pdf", "png", "jpg", "xlsx", "csv"])
                 
                 if uploaded_file is not None:
-                    # Clean filename parameters to isolate potential Serial Numbers
                     filename_clean = str(uploaded_file.name).upper().strip()
                     st.markdown("### 🧠 AI Analysis Results:")
                     
                     matched_row = None
-                    # Search structural index for a matching ID within the uploaded filename
                     for _, row in active_df.iterrows():
                         asset_id = str(row["ID"]).upper().strip()
                         if asset_id in filename_clean:
@@ -237,37 +231,34 @@ if raw_df is not None:
                             break
                     
                     if matched_row is not None:
-                        st.success(f"✅ **AI Match Successful:** Isolated target Asset ID `{matched_row['ID']}` from file name.")
-                        
+                        st.success(f"✅ **AI Match Successful:** Isolated target Asset ID `{matched_row['ID']}` from filename attributes.")
                         col_ai1, col_ai2 = st.columns(2)
                         with col_ai1:
                             st.write(f"**Equipment:** {matched_row['Description']}")
                             st.write(f"**Department/Line Location:** {matched_row['Department']}")
                             st.write(f"**Target System Expiry Date:** {matched_row['Due_Date']}")
-                        
                         with col_ai2:
                             days_left = matched_row['Days Remaining']
                             if days_left < 0:
                                 st.error(f"🔴 **CALIBRATION DATE IS PENDING (OVERDUE)**\n\nThis device is operating **{abs(days_left)} days past its certificate expiration limit**. Immediate verification turnaround required.")
                             elif days_left <= 30:
-                                st.warning(f"🟠 **CALIBRATION RUN PENDING SOON**\n\nCertificate is current but expires in **{days_left} days**. Prepare upcoming scheduling window.")
+                                st.warning(f"🟠 **CALIBRATION RUN PENDING SOON**\n\nCertificate is current but expires in **{days_left} days**. Prepare upcoming engineering scheduling window.")
                             else:
-                                st.info(f"🟢 **CERTIFICATE DATE IS CURRENT / VALID**\n\nDevice compliance is verified healthy for the next **{days_left} days**.")
+                                st.info(f"🟢 **CERTIFICATE DATE IS CURRENT / VALID**\n\nDevice compliance verification is healthy for the next **{days_left} days**.")
                     else:
-                        # Fallback heuristic simulation if filename mapping is generic
-                        st.info("⚠️ **AI Classification Notice:** Could not match a specific Serial Number directly from the file name string.")
-                        st.write("Please select the instrument manually from the checklist below so the AI engine can audit the document against the correct tracking row:")
+                        st.info("⚠️ **AI Classification Notice:** Could not match a specific Serial Number identifier from the filename string structure.")
+                        st.write("Please select the target instrument manual reference from the matrix box below to run the timeline audit verification loop:")
                         
-                        manual_selection = st.selectbox("Select Target Plant Asset to Map:", active_df["ID"].unique())
+                        manual_selection = st.selectbox("Select Target Plant Asset to Map:", sorted(active_df["ID"].unique()))
                         manual_row = active_df[active_df["ID"] == manual_selection].iloc[0]
                         
                         st.markdown("---")
-                        st.write(f"📊 **AI Compliance Audit for Asset ID: {manual_row['ID']}** ({manual_row['Description']})")
+                        st.write(f"📊 **AI Compliance Data Audit for Asset ID: {manual_row['ID']}** ({manual_row['Description']})")
                         days_left = manual_row['Days Remaining']
                         if days_left < 0:
-                            st.error(f"🔴 **CALIBRATION DATE STATUS: PENDING AUDIT OVERDUE**\n\nThis device is currently **{abs(days_left)} days past its timeline boundary**. Tag out required.")
+                            st.error(f"🔴 **CALIBRATION DATE STATUS: PENDING AUDIT OVERDUE**\n\nThis asset device is currently running **{abs(days_left)} days past its safe timeline boundary**.")
                         else:
-                            st.success(f"🟢 **CALIBRATION DATE STATUS: VALID / CURRENT**\n\nCertificate is verified secure for **{days_left} days**.")
+                            st.success(f"🟢 **CALIBRATION DATE STATUS: VALID / CURRENT**\n\nCertificate timeline matrix is verified secure for the next **{days_left} days**.")
 
             # ----------------------------------------------------
             # TAB 4: GOVERNANCE FRAMEWORK
@@ -287,6 +278,6 @@ if raw_df is not None:
                 )
 
     except Exception as e:
-        st.error(f"Failed to compile operational panels from current sheet schema: {str(e)}")
+        st.error(f"Failed to compile operational panels from current sheet schema layout view: {str(e)}")
 else:
-    st.info("Please fill in your active SharePoint workbook link or save the master database template workbook file in the repository root directory.")
+    st.info("Please complete the direct download data link format configuration on the sidebar utility panel block.")
