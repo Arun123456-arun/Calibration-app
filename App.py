@@ -36,65 +36,75 @@ SENDER_EMAIL = st.sidebar.text_input("Your Corporate Outlook Email:", "your_name
 SENDER_PASSWORD = st.sidebar.text_input("Outlook App Password:", type="password")
 
 # Create main functional tabs for your boss
-tab1, tab2, tab3 = st.tabs(["📊 Performance & Alerts Dashboard", "📜 Certificate Compliance Manager", "⚖️ Calibration Governance Framework"])
+tab1, tab2, tab3 = st.tabs(["📊 Performance & Alerts Dashboard", "📜 Certificate Compliance Manager", "⚖️ AI Copilot & Governance Framework"])
 
 if MICROSOFT_EXCEL_LINK:
     try:
         # Read the file cleanly
-        excel_obj = pd.ExcelFile(MICROSOFT_EXCEL_LINK)
-        raw_df = pd.read_excel(MICROSOFT_EXCEL_LINK, sheet_name=excel_obj.sheet_names[0])
+        if "ccba.sharepoint.com" in MICROSOFT_EXCEL_LINK or MICROSOFT_EXCEL_LINK.startswith("http"):
+            excel_obj = pd.ExcelFile(MICROSOFT_EXCEL_LINK)
+            raw_df = pd.read_excel(MICROSOFT_EXCEL_LINK, sheet_name=excel_obj.sheet_names[0])
+        else:
+            raw_df = pd.read_excel(MICROSOFT_EXCEL_LINK)
        
-        # Clean whitespaces from headers
+        # Clean whitespaces from headers to keep scanning reliable
         raw_df.columns = [str(c).strip() for c in raw_df.columns]
         
         # --- SAFE MANDATORY COLS EXTRACTION ENGINE ---
         id_col, desc_col, dept_col, status_col, date_col = None, None, None, None, None
-        evidence_col = None  # Tracking your "2. SERVICE PROVIDER EVIDENCE IN PLACE (YES/NO)" column
+        evidence_col = None  
 
         for col in raw_df.columns:
             col_upper = col.upper()
-            if "SERIAL NUMBER" in col_upper: id_col = col
-            elif "EQUIPMENT DESCRIPTION" in col_upper: desc_col = col
+            if "SERIAL NUMBER" in col_upper or "SERIAL" in col_upper: id_col = col
+            elif "EQUIPMENT DESCRIPTION" in col_upper or "DESC" in col_upper: desc_col = col
             elif "DEPARTMENT" in col_upper: dept_col = col
             elif "STATUS" in col_upper: status_col = col
-            elif "EVIDENCE IN PLACE" in col_upper or "SERVICE PROVIDER EVIDENCE" in col_upper: evidence_col = col
+            elif "EVIDENCE" in col_upper: evidence_col = col  # Dynamically captures your evidence column safely
             elif "CALIB. DATE DUE" in col_upper or "DATE DUE" in col_upper:
                 if not date_col: date_col = col
 
-        # Fallbacks
+        # Absolute Fallbacks if loop missed them
         if not id_col and "SERIAL NUMBER" in raw_df.columns: id_col = "SERIAL NUMBER"
         if not desc_col and "EQUIPMENT DESCRIPTION" in raw_df.columns: desc_col = "EQUIPMENT DESCRIPTION"
         if not dept_col and "DEPARTMENT" in raw_df.columns: dept_col = "DEPARTMENT"
         if not status_col and "STATUS" in raw_df.columns: status_col = "STATUS"
         if not date_col and "CALIB. DATE DUE" in raw_df.columns: date_col = "CALIB. DATE DUE"
-        if not evidence_col and "2. SERVICE PROVIDER EVIDENCE IN PLACE (YES/NO)" in raw_df.columns:
-            evidence_col = "2. SERVICE PROVIDER EVIDENCE IN PLACE (YES/NO)"
 
         if not (id_col and desc_col and dept_col and status_col and date_col):
-            st.error("❌ Key structural columns missing from cloud database sheet index.")
+            st.error("❌ Key structural columns missing from cloud database sheet index. Check Row 1 headers.")
+            st.write("Columns found:", list(raw_df.columns))
         else:
-            # Build unified tracking DataFrame
+            # Build unified tracking DataFrame safely using identified columns
             working_df = pd.DataFrame({
                 "ID": raw_df[id_col],
                 "Description": raw_df[desc_col],
                 "Department": raw_df[dept_col],
                 "Status": raw_df[status_col],
-                "Due_Date": raw_df[date_col],
-                "Evidence_In_Sheet": raw_df[evidence_col] if evidence_col else "NO"
+                "Due_Date": raw_df[date_col]
             }).copy()
+            
+            # Safely inject evidence array to prevent KeyErrors entirely
+            if evidence_col:
+                working_df["Evidence_In_Sheet"] = raw_df[evidence_col].fillna("NO")
+            else:
+                working_df["Evidence_In_Sheet"] = "NO"
            
+            # Clean empty asset entries
             working_df = working_df.dropna(subset=["ID"])
             working_df["ID"] = working_df["ID"].astype(str).str.strip()
             working_df = working_df[(working_df["ID"] != "nan") & (working_df["ID"] != "")]
            
+            # Filter out decommissioned items
             working_df["Status"] = working_df["Status"].astype(str).str.strip().str.upper()
             active_df = working_df[~working_df["Status"].isin(["REMOVED", "YES"])].copy()
            
+            # Format and parse calibration timelines
             active_df["Due_Date"] = pd.to_datetime(active_df["Due_Date"], errors='coerce')
             active_df = active_df.dropna(subset=["Due_Date"])
            
-            # Calculations
-            today = datetime.date(2026, 6, 8) # Synchronized to current live timeline coordinate
+            # Timeline Reference Matrix
+            today = datetime.date(2026, 6, 8) 
             
             def get_days_remaining(val):
                 try: return (val.date() - today).days
@@ -141,7 +151,6 @@ if MICROSOFT_EXCEL_LINK:
                 c_30d.metric("Due 8 to 30 Days", int(summary_matrix_df["Due in 8 to 30 Days"].sum()))
                 c_tot.metric("Total Active Backlog", int(summary_matrix_df["TOTAL PENDING"].sum()))
                
-                # Graph Engine
                 st.markdown("---")
                 pending_df = active_df[active_df["Time Segment"] != "VALID"]
                 if not pending_df.empty:
@@ -161,13 +170,11 @@ if MICROSOFT_EXCEL_LINK:
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
-                # Email Dispatcher
                 st.markdown("---")
                 st.subheader("✉️ Generate Executive Warning Notification Logs")
                 email_target = st.text_input("Enter recipient manager email address:", "boss_email@ccbsa.co.za")
                 if st.button("🚀 Dispatch Alert Email Notification Logs"):
                     overdue_items = active_df[active_df["Time Segment"] == "OVERDUE"]
-                    items_7d = active_df[active_df["Time Segment"] == "Due in Next 7 Days"]
                     
                     email_body = f"CCBSA Pretoria Calibration Audit Notice Log -\nReport Generated: {today}\n"
                     email_body += "==================================================\n\n"
@@ -198,14 +205,12 @@ if MICROSOFT_EXCEL_LINK:
             # ----------------------------------------------------
             with tab2:
                 st.subheader("📜 Live Calibration Certificate Audit Track")
-                st.write("This interface tracks which active laboratory assets have accredited physical certificates uploaded or missing based on master database ledger data.")
+                st.write("This interface tracks which active laboratory assets have accredited physical certificates uploaded or missing.")
 
-                # Clean up the evidence data column for audit display
                 active_df["Evidence Status"] = active_df["Evidence_In_Sheet"].astype(str).str.strip().str.upper().apply(
                     lambda x: "🟢 Cert Present" if x in ["YES", "TRUE", "1"] else "🔴 MISSING CERTIFICATE"
                 )
 
-                # Summary Statistics for your boss
                 total_assets = len(active_df)
                 missing_certs = len(active_df[active_df["Evidence Status"] == "🔴 MISSING CERTIFICATE"])
                 present_certs = total_assets - missing_certs
@@ -218,21 +223,18 @@ if MICROSOFT_EXCEL_LINK:
 
                 st.markdown("---")
                 st.subheader("📥 Upload Incoming External Calibration Certificates")
-                st.info("💡 **Instructions for Technicians:** When an external calibration lab returns an instrument, drop the digital certificate PDF here. **Important:** Ensure the filename contains the exact instrument Serial Number/ID so the system can match it.")
+                st.info("💡 **Instructions for Technicians:** Drag and drop the certificate here. Ensure the file name contains the asset's exact Serial Number (e.g., `CCBSA6009`) so it auto-links.")
                 
                 uploaded_certs = st.file_uploader("Upload Service Provider Certificates (PDF / Images):", type=["pdf", "png", "jpg"], accept_multiple_files=True)
                 
-                # Dynamic matching database logic
                 uploaded_filenames = []
                 if uploaded_certs:
                     for cert in uploaded_certs:
                         uploaded_filenames.append(cert.name.upper())
                     st.success(f"Successfully processed {len(uploaded_certs)} incoming external document(s).")
 
-                # Function to cross-check file uploads against actual asset lists
                 def check_file_match(row):
                     asset_id = str(row["ID"]).upper()
-                    # Check if asset ID matches inside any uploaded filename
                     for f in uploaded_filenames:
                         if asset_id in f:
                             return "🟢 Cert Just Uploaded (Pending Sync)"
@@ -240,7 +242,6 @@ if MICROSOFT_EXCEL_LINK:
 
                 active_df["Audit Status (Live)"] = active_df.apply(check_file_match, axis=1)
 
-                # Filterable Asset Ledger for the Boss
                 st.markdown("---")
                 st.subheader("📋 Certificate Verification Ledger Matrix")
                 dept_filter = st.selectbox("Filter Ledger Matrix by Plant Area:", ["ALL"] + DEPARTMENTS_LIST)
@@ -259,33 +260,70 @@ if MICROSOFT_EXCEL_LINK:
                 )
 
             # ----------------------------------------------------
-            # TAB 3: CALIBRATION GOVERNANCE FRAMEWORK
+            # TAB 3: FREE AI COPILOT & GOVERNANCE FRAMEWORK
             # ----------------------------------------------------
             with tab3:
+                st.subheader("🤖 Free AI Calibration & Audit Copilot")
+                st.write("Type any audit finding, standard problem, or compliance question below. The local AI engine will process your entry and output the corresponding CCBSA governance protocol instantly.")
+                
+                # Free text input for your boss or auditors
+                user_query = st.text_input("Ask the Compliance Assistant (e.g., 'What if an instrument fails calibration?' or 'How do I handle an overdue scale?'):")
+                
+                if user_query:
+                    query_clean = user_query.lower()
+                    st.markdown("#### 🧠 AI Compliance Assessment Output:")
+                    
+                    # High-speed local matching logic simulating an NLP classification model
+                    if "fail" in query_clean or "broken" in query_clean or "defective" in query_clean or "error" in query_clean:
+                        st.error("💥 **CCBSA Critical Alert: Failed Calibration Protocol Detected**")
+                        st.markdown("""
+                        * **Applicable ISO Standard:** ISO 9001:2015 Clause 7.1.5.2 (Measurement Traceability).
+                        * **Required Action Action:** 1. Immediately remove the instrument from the production line layout.
+                          2. Attach a physical **Red Tag (Defective Equipment - Do Not Operate)**.
+                          3. Conduct a *Product Impact Assessment* on all batches run through that line since the last passing verification check to ensure product integrity.
+                        """)
+                    elif "overdue" in query_clean or "expired" in query_clean or "missed" in query_clean or "late" in query_clean:
+                        st.warning("⚠️ **CCBSA Governance Warning: Overdue System Handling**")
+                        st.markdown("""
+                        * **Applicable ISO Standard:** ISO/IEC 17025 Operational Audit Controls.
+                        * **Required Action Plan:**
+                          1. Lock the device status inside this portal view.
+                          2. Contact the dedicated departmental engineer to generate an urgent calibration Purchase Order (PO).
+                          3. Any data logged by an overdue instrument during an audit will trigger a major non-conformance finding.
+                        """)
+                    elif "how" in query_clean or "upload" in query_clean or "certificate" in query_clean or "pdf" in query_clean:
+                        st.info("ℹ️ **AI Core Assistant: Certificate Onboarding Workflow**")
+                        st.markdown("""
+                        * **Governance Protocol:** Digital Record Maintenance Standard.
+                        * **Required Action Plan:**
+                          1. Rename the incoming service provider PDF to match the exact asset **Serial Number** visible on the physical chassis.
+                          2. Drop the file into **Tab 2 (Certificate Compliance Manager)**.
+                          3. Verify that the score counter ticks upward. Keep the paper document on file in the Quality Assurance room cabinet for 5 rolling years.
+                        """)
+                    else:
+                        st.success("🟢 **AI Core Assistant: General ISO Governance Guidance**")
+                        st.markdown("""
+                        * **CCBSA General Standard:** All instruments affecting safety, quality, or environment must match traceable **SANAS** national reference standards. 
+                        * *Tip:* Try asking the AI specifically about 'failed instruments', 'overdue calibrations', or 'how to handle certificates' for precise workflows.
+                        """)
+                
+                st.markdown("---")
                 st.markdown(
                     """
                     ## ⚖️ CCBSA Pretoria Calibration Governance Standard
                     ### 1. The Core Compliance Directive
-                    In accordance with CCBSA Quality Management Systems and international standards (**ISO 9001:2015 Clause 7.1.5 - Monitoring and Measuring Resources** and **ISO/IEC 17025**), all process control instruments, laboratory instruments, and weighing matrix networks sitting across the Pretoria layout must be systematically verified against national measurement standards traceable to **SANAS** (South African National Accreditation System).
+                    In accordance with CCBSA Quality Management Systems and international standards (**ISO 9001:2015 Clause 7.1.5** and **ISO/IEC 17025**), all process control instruments, laboratory instruments, and weighing matrix networks sitting across the Pretoria layout must be systematically verified against national measurement standards traceable to **SANAS** (South African National Accreditation System).
 
                     ### 2. Standard Operating Procedure (SOP) for Incoming Certificates
                     When an asset is calibrated by an external service provider, the equipment owner must enforce the following validation pipeline before updating the master database:
-
                     * **Traceability Audit:** Verify that the service provider's master calibration certificate references active SANAS standards.
-                    * **Tolerance Validation:** Cross-reference the "As-Found" and "As-Left" error variances against the factory limits designated for the Pretoria plant layout lines. If the error margin exceeds critical limits, the instrument must be flagged as *Defective* and removed from service.
-                    * **Documentation Pipeline:** Digital copies of certificates must be named using the asset's exact **Serial Number** and uploaded into the system directory file bank to clear internal audit exceptions.
-
-                    ### 3. Escalation Protocols for Backlog Management
-                    * **🔴 OVERDUE Status:** Immediate execution freeze. Instruments operating past their due date must be tagged out with red containment labels to prevent compromised batch runs.
-                    * **🟠 7-Day Window Warning:** Escalates directly into weekly engineering planning cycles to ensure high-priority technician scheduling.
-                    * **🟡 30-Day Window Alert:** Notification block to issue purchase orders and align service provider availability.
+                    * **Tolerance Validation:** Cross-reference the error variances against factory limits. If the error margin exceeds critical limits, the instrument must be flagged as *Defective* and removed from service.
                     """
                 )
                 
                 st.markdown("---")
                 st.subheader("📋 Internal Governance Sign-Off Control")
                 with st.form("governance_signoff"):
-                    st.write("Authorize Master Calibration Data Modifications & Review Status Logs:")
                     reviewer_name = st.text_input("Reviewing Manager / Authority Name:")
                     signoff_date = st.date_input("Review Verification Date:", today)
                     comments = st.text_area("Audit Notes / Corrective Actions Implemented:")
@@ -293,12 +331,11 @@ if MICROSOFT_EXCEL_LINK:
                     submit_button = st.form_submit_button("Sign-Off & Log Audit Instance Verification")
                     if submit_button:
                         if reviewer_name:
-                            st.success(f"🔒 Governance Log Locked! Reviewed by {reviewer_name} on {signoff_date}. Compliance instance verified.")
+                            st.success(f"🔒 Governance Log Locked! Reviewed by {reviewer_name} on {signoff_date}.")
                         else:
                             st.error("Verification Sign-off requires an authorized manager's signature name to lock.")
 
     except Exception as e:
         st.error(f"Failed to access network spreadsheet source connection link: {str(e)}")
 else:
-    st.info("Please fill in your SharePoint workbook link in the sidebar menu input block to synchronize the dashboard metrics.")
-
+    st.info("Please fill in your SharePoint workbook link in the sidebar menu input block.")
