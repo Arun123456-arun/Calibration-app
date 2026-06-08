@@ -302,4 +302,3 @@ if MICROSOFT_EXCEL_LINK:
 else:
     st.info("Please fill in your SharePoint workbook link in the sidebar menu input block to synchronize the dashboard metrics.")
 
-```
